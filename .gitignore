@@ -2,7 +2,10 @@ echo "venv/
 .env
 __pycache__/
 *.pyc
+*.pyo
 chatbot.db
 expenses.db
 *.db
+*.dll
+*.so
 " > .gitignore
