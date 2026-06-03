@@ -1,0 +1,100 @@
+{
+  "food": [
+    "groceries",
+    "restaurant",
+    "cafe",
+    "street food",
+    "food delivery",
+    "snacks",
+    "beverages"
+  ],
+  "transport": [
+    "fuel",
+    "public bus",
+    "taxi",
+    "ride share",
+    "parking",
+    "vehicle maintenance",
+    "vehicle insurance",
+    "flight ticket",
+    "train ticket"
+  ],
+  "housing": [
+    "rent",
+    "electricity bill",
+    "water bill",
+    "internet bill",
+    "house maintenance",
+    "furniture",
+    "appliances",
+    "cleaning supplies"
+  ],
+  "utilities": [
+    "mobile recharge",
+    "postpaid bill",
+    "cable tv",
+    "lpg cylinder",
+    "water can"
+  ],
+  "health": [
+    "doctor consultation",
+    "medicines",
+    "lab tests",
+    "hospital",
+    "health insurance",
+    "gym membership",
+    "yoga class",
+    "dental"
+  ],
+  "education": [
+    "school fees",
+    "college fees",
+    "online course",
+    "books",
+    "stationery",
+    "coaching",
+    "exam fees"
+  ],
+  "family_kids": [
+    "child school fees",
+    "child clothes",
+    "child toys",
+    "baby products",
+    "family outing",
+    "gift"
+  ],
+  "entertainment": ["movies", "concerts", "sports event", "games", "hobby"],
+  "shopping": [
+    "clothes",
+    "shoes",
+    "electronics",
+    "accessories",
+    "home decor",
+    "personal care"
+  ],
+  "subscriptions": [
+    "netflix",
+    "spotify",
+    "youtube premium",
+    "amazon prime",
+    "software license",
+    "cloud storage"
+  ],
+  "savings_investment": [
+    "fd deposit",
+    "mutual fund",
+    "stocks",
+    "rd deposit",
+    "gold",
+    "crypto"
+  ],
+  "personal_care": ["haircut", "salon", "spa", "cosmetics"],
+  "social": ["wedding gift", "party", "donation", "religious function"],
+  "emis_loans": [
+    "home loan emi",
+    "car loan emi",
+    "personal loan emi",
+    "credit card bill"
+  ],
+  "miscellaneous": ["atm withdrawal", "bank charges", "fine penalty", "other"]
+}
