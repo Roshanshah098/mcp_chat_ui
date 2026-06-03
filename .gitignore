@@ -9,3 +9,14 @@ expenses.db
 *.dll
 *.so
 " > .gitignore 
+
+@"
+venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.dll
+*.so
+"@ | Out-File -FilePath .gitignore -Encoding utf8
