@@ -8,4 +8,4 @@ expenses.db
 *.db
 *.dll
 *.so
-" > .gitignore
+" > .gitignore 
