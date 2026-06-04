@@ -14,10 +14,13 @@ from langchain_core.tools import tool, BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from dotenv import load_dotenv
 import aiosqlite
+import sqlite3
 import requests
 import asyncio
 import threading
 import tempfile
+import json
+import re
 import os
 
 load_dotenv()
@@ -45,19 +48,113 @@ def submit_async_task(coro):
 # 1. LLM + Embeddings
 # -------------------
 llm = ChatGroq(
-    # model="llama-3.3-70b-versatile",
-    model="llama-3.1-8b-instant",
+    model="llama-3.3-70b-versatile",
     temperature=0.3,
 )
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # -------------------
-# 2. Document retriever store (per thread)
+# 2. Document store — in-memory + SQLite persistence
 # -------------------
 _THREAD_RETRIEVERS: Dict[str, Any] = {}
 _THREAD_METADATA: Dict[str, dict] = {}
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx"}
+DOC_DB = "chatbot.db"
+
+
+def _doc_db_conn():
+    conn = sqlite3.connect(DOC_DB, check_same_thread=False)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS thread_documents (
+            thread_id TEXT PRIMARY KEY,
+            filename  TEXT NOT NULL,
+            filetype  TEXT NOT NULL,
+            metadata  TEXT NOT NULL,
+            file_blob BLOB NOT NULL
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+_doc_conn = _doc_db_conn()
+
+
+def _save_doc_to_db(
+    thread_id: str, filename: str, filetype: str, metadata: dict, file_bytes: bytes
+):
+    _doc_conn.execute(
+        """INSERT OR REPLACE INTO thread_documents
+           (thread_id, filename, filetype, metadata, file_blob)
+           VALUES (?, ?, ?, ?, ?)""",
+        (thread_id, filename, filetype, json.dumps(metadata), file_bytes),
+    )
+    _doc_conn.commit()
+
+
+def _delete_doc_from_db(thread_id: str):
+    _doc_conn.execute("DELETE FROM thread_documents WHERE thread_id=?", (thread_id,))
+    _doc_conn.commit()
+
+
+def _load_all_docs_from_db():
+    """Re-ingest all persisted documents on startup."""
+    rows = _doc_conn.execute(
+        "SELECT thread_id, filename, filetype, metadata, file_blob FROM thread_documents"
+    ).fetchall()
+    for thread_id, filename, filetype, metadata_json, file_bytes in rows:
+        try:
+            meta = json.loads(metadata_json)
+            _rebuild_retriever(thread_id, filename, filetype, file_bytes, meta)
+        except Exception as e:
+            print(f"[warn] Could not reload doc for thread {thread_id}: {e}")
+
+
+def _rebuild_retriever(
+    thread_id: str, filename: str, filetype: str, file_bytes: bytes, existing_meta: dict
+):
+    """Build FAISS retriever from raw bytes (used on reload)."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=filetype) as f:
+        f.write(file_bytes)
+        temp_path = f.name
+    try:
+        if filetype == ".pdf":
+            loader = PyPDFLoader(temp_path)
+        else:
+            loader = Docx2txtLoader(temp_path)
+        docs = loader.load()
+
+        for doc in docs:
+            text = doc.page_content
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            text = "\n".join(line.strip() for line in text.splitlines())
+            doc.page_content = text.strip()
+
+        chunk_size = existing_meta.get("chunk_size", 1000)
+        chunk_overlap = existing_meta.get("chunk_overlap", 200)
+        k = existing_meta.get("k", 4)
+        fetch_k = existing_meta.get("fetch_k", 20)
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n", "\n", " ", ""],
+        )
+        chunks = splitter.split_documents(docs)
+
+        vector_store = FAISS.from_documents(chunks, embeddings)
+        retriever = vector_store.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": k, "fetch_k": fetch_k},
+        )
+        _THREAD_RETRIEVERS[str(thread_id)] = retriever
+        _THREAD_METADATA[str(thread_id)] = existing_meta
+    finally:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
 
 
 def _get_retriever(thread_id: Optional[str]):
@@ -66,26 +163,12 @@ def _get_retriever(thread_id: Optional[str]):
     return None
 
 
-def _load_file(file_bytes: bytes, suffix: str, temp_path: str):
-    """Load documents from a PDF or DOCX file."""
-    if suffix == ".pdf":
-        loader = PyPDFLoader(temp_path)
-    elif suffix == ".docx":
-        loader = Docx2txtLoader(temp_path)
-    else:
-        raise ValueError(f"Unsupported file type: {suffix}")
-    return loader.load()
-
-
 def ingest_document(
     file_bytes: bytes,
     thread_id: str,
     filename: Optional[str] = None,
 ) -> dict:
-    """
-    Build a FAISS retriever for an uploaded PDF or DOCX and store it for the thread.
-    Returns a summary dict surfaced in the UI.
-    """
+    """Build a FAISS retriever for an uploaded PDF or DOCX, persist to DB."""
     if not file_bytes:
         raise ValueError("No bytes received for ingestion.")
 
@@ -100,10 +183,11 @@ def ingest_document(
         temp_path = temp_file.name
 
     try:
-        docs = _load_file(file_bytes, suffix, temp_path)
-
-        # Clean text for docx (extra blank lines etc.)
-        import re
+        if suffix == ".pdf":
+            loader = PyPDFLoader(temp_path)
+        else:
+            loader = Docx2txtLoader(temp_path)
+        docs = loader.load()
 
         for doc in docs:
             text = doc.page_content
@@ -113,7 +197,6 @@ def ingest_document(
 
         total_chars = sum(len(doc.page_content) for doc in docs)
 
-        # Auto chunk size
         if total_chars < 5_000:
             chunk_size, chunk_overlap = 500, 50
         elif total_chars < 20_000:
@@ -131,10 +214,8 @@ def ingest_document(
             separators=["\n\n", "\n", " ", ""],
         )
         chunks = splitter.split_documents(docs)
-
         total_chunks = len(chunks)
 
-        # Auto k / fetch_k
         if total_chunks < 20:
             k, fetch_k = 4, 10
         elif total_chunks < 50:
@@ -152,8 +233,7 @@ def ingest_document(
             search_kwargs={"k": k, "fetch_k": fetch_k},
         )
 
-        _THREAD_RETRIEVERS[str(thread_id)] = retriever
-        _THREAD_METADATA[str(thread_id)] = {
+        meta = {
             "filename": filename,
             "filetype": suffix,
             "documents": len(docs),
@@ -164,7 +244,13 @@ def ingest_document(
             "fetch_k": fetch_k,
         }
 
-        return _THREAD_METADATA[str(thread_id)]
+        _THREAD_RETRIEVERS[str(thread_id)] = retriever
+        _THREAD_METADATA[str(thread_id)] = meta
+
+        # Persist to SQLite so it survives restarts
+        _save_doc_to_db(str(thread_id), filename, suffix, meta, file_bytes)
+
+        return meta
 
     finally:
         try:
@@ -173,22 +259,59 @@ def ingest_document(
             pass
 
 
-# Keep old name as alias so existing calls still work
+def remove_document(thread_id: str):
+    """Remove a document from memory and DB for a thread."""
+    thread_id = str(thread_id)
+    _THREAD_RETRIEVERS.pop(thread_id, None)
+    _THREAD_METADATA.pop(thread_id, None)
+    _delete_doc_from_db(thread_id)
+
+
+# Keep alias
 ingest_pdf = ingest_document
+
+# Load all persisted docs on startup
+_load_all_docs_from_db()
 
 
 # -------------------
-# 3. Tools
+# 3. Chat title store (SQLite)
+# -------------------
+def _init_title_table():
+    _doc_conn.execute("""
+        CREATE TABLE IF NOT EXISTS thread_titles (
+            thread_id TEXT PRIMARY KEY,
+            title     TEXT NOT NULL
+        )
+    """)
+    _doc_conn.commit()
+
+
+_init_title_table()
+
+
+def save_thread_title(thread_id: str, title: str):
+    _doc_conn.execute(
+        "INSERT OR IGNORE INTO thread_titles (thread_id, title) VALUES (?, ?)",
+        (str(thread_id), title),
+    )
+    _doc_conn.commit()
+
+
+def get_all_thread_titles() -> Dict[str, str]:
+    rows = _doc_conn.execute("SELECT thread_id, title FROM thread_titles").fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+# -------------------
+# 4. Tools
 # -------------------
 search_tool = DuckDuckGoSearchRun(region="us-en")
 
 
 @tool
 def get_stock_price(symbol: str) -> dict:
-    """
-    Fetch latest stock price for a given symbol (e.g. 'AAPL', 'TSLA')
-    using Alpha Vantage.
-    """
+    """Fetch latest stock price for a given symbol (e.g. 'AAPL', 'TSLA')."""
     url = (
         "https://www.alphavantage.co/query"
         f"?function=GLOBAL_QUOTE&symbol={symbol}"
@@ -199,11 +322,27 @@ def get_stock_price(symbol: str) -> dict:
 
 
 @tool
+def calculator(expression: str) -> dict:
+    """
+    Evaluate a math expression like '2 + 2', '10 * 5', '100 / 4'.
+    Supports +, -, *, /, ** (power), % (modulo).
+    Always use this for any math question.
+    """
+    try:
+        allowed = set("0123456789+-*/.() %**")
+        if not all(c in allowed for c in expression.replace(" ", "")):
+            return {"error": "Invalid characters in expression"}
+        result = eval(expression, {"__builtins__": {}})
+        return {"expression": expression, "result": result}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@tool
 def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
     """
     Retrieve relevant information from the uploaded PDF or DOCX for this chat thread.
     Always include the thread_id when calling this tool.
-    Use this when the user asks questions about their uploaded document.
     """
     retriever = _get_retriever(thread_id)
     if retriever is None:
@@ -213,13 +352,10 @@ def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
         }
 
     result = retriever.invoke(query)
-    context = [doc.page_content for doc in result]
-    metadata = [doc.metadata for doc in result]
-
     return {
         "query": query,
-        "context": context,
-        "metadata": metadata,
+        "context": [doc.page_content for doc in result],
+        "metadata": [doc.metadata for doc in result],
         "source_file": _THREAD_METADATA.get(str(thread_id), {}).get("filename"),
     }
 
@@ -229,10 +365,10 @@ def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
 # -------------------
 client = MultiServerMCPClient(
     {
-        "math": {
-            "transport": "streamable_http",
-            "url": "https://subhai-mcp-testing.fastmcp.app/mcp",
-        },
+        # "math": {
+        #     "transport": "streamable_http",
+        #     "url": "https://subhai-mcp-testing.fastmcp.app/mcp",
+        # },
         "expense": {
             "transport": "stdio",
             "command": "C:/Users/Hp/AppData/Local/Programs/Python/Python312/Scripts/uv.exe",
@@ -259,22 +395,21 @@ def load_mcp_tools() -> list[BaseTool]:
 
 mcp_tools = load_mcp_tools()
 
-tools = [search_tool, get_stock_price, rag_tool, *mcp_tools]
+tools = [search_tool, get_stock_price, calculator, rag_tool, *mcp_tools]
 llm_with_tools = llm.bind_tools(tools) if tools else llm
 
 
 # -------------------
-# 4. State
+# 5. State
 # -------------------
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
 # -------------------
-# 5. Nodes
+# 6. Nodes
 # -------------------
 async def chat_node(state: ChatState, config=None):
-    """LLM node that may answer or request a tool call."""
     thread_id = None
     if config and isinstance(config, dict):
         thread_id = config.get("configurable", {}).get("thread_id")
@@ -286,19 +421,31 @@ async def chat_node(state: ChatState, config=None):
 
     system_message = SystemMessage(
         content=(
-            "You are a helpful assistant with access to multiple tools:\n"
-            "- web search (DuckDuckGo)\n"
-            "- stock price lookup\n"
-            "- math operations (MCP)\n"
-            "- expense tracking (MCP)\n"
+            "You are a helpful, friendly assistant with access to these tools:\n\n"
+            "- search_tool: search the web for current information\n"
+            "- get_stock_price: fetch live stock prices by symbol\n"
+            "- calculator: solve any math — always use this, never answer math in plain text\n"
+            "- add_expense: add a new expense\n"
+            "- list_expenses: list expenses in a date range\n"
+            "- edit_expense: edit an existing expense by id\n"
+            "- delete_expense: delete an expense by id\n"
+            "- add_credit: add income or salary\n"
+            "- list_credits: list income in a date range\n"
+            "- summarize: summarize expenses vs income and show balance\n"
             + (
-                f"- rag_tool: to answer questions from the uploaded "
+                f"- rag_tool: answer questions from the uploaded "
                 f"{'PDF' if filetype == '.pdf' else 'DOCX'} '{doc_name}'. "
                 f"Always pass thread_id='{thread_id}' when calling rag_tool.\n"
                 if has_doc
-                else "- rag_tool: not available yet (no document uploaded for this chat).\n"
+                else "- rag_tool: not available (no document uploaded for this chat).\n"
             )
-            + "\nUse the right tool for the right task. Be concise and helpful."
+            + "\nRULES:\n"
+            "- Make ONE tool call at a time, never chain multiple tools in one turn\n"
+            "- For edit or delete, ALWAYS call list_expenses first to find the correct id — never ask the user for an id\n"
+            "- For expenses, if no date is mentioned assume today's date\n"
+            "- After getting a tool result, give a short clean friendly response\n"
+            "- Never show raw JSON or tool output to the user\n"
+            "- Be concise and helpful\n"
         )
     )
 
@@ -311,7 +458,7 @@ tool_node = ToolNode(tools) if tools else None
 
 
 # -------------------
-# 6. Checkpointer
+# 7. Checkpointer
 # -------------------
 async def _init_checkpointer():
     conn = await aiosqlite.connect(database="chatbot.db")
@@ -321,7 +468,7 @@ async def _init_checkpointer():
 checkpointer = run_async(_init_checkpointer())
 
 # -------------------
-# 7. Graph
+# 8. Graph
 # -------------------
 graph = StateGraph(ChatState)
 graph.add_node("chat_node", chat_node)
@@ -338,7 +485,7 @@ chatbot = graph.compile(checkpointer=checkpointer)
 
 
 # -------------------
-# 8. Helpers
+# 9. Helpers
 # -------------------
 async def _alist_threads():
     all_threads = set()

@@ -1,16 +1,3 @@
-echo "venv/
-.env
-__pycache__/
-*.pyc
-*.pyo
-chatbot.db
-expenses.db
-*.db
-*.dll
-*.so
-" > .gitignore 
-
-@"
 venv/
 .env
 __pycache__/
@@ -19,4 +6,15 @@ __pycache__/
 *.db
 *.dll
 *.so
-"@ | Out-File -FilePath .gitignore -Encoding utf8
+
+
+# @"
+# venv/
+# .env
+# __pycache__/
+# *.pyc
+# *.pyo
+# *.db
+# *.dll
+# *.so
+# "@ | Out-File -FilePath .gitignore -Encoding utf8

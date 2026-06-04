@@ -1,5 +1,6 @@
 import queue
 import uuid
+from datetime import datetime
 
 import streamlit as st
 from langraph_rag_backend import (
@@ -9,6 +10,8 @@ from langraph_rag_backend import (
     submit_async_task,
     thread_document_metadata,
     thread_has_document,
+    save_thread_title,
+    get_all_thread_titles,
     SUPPORTED_EXTENSIONS,
 )
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -87,7 +90,7 @@ st.markdown(
 
 # =========================== Utilities ===========================
 def generate_thread_id():
-    return uuid.uuid4()
+    return str(uuid.uuid4())
 
 
 def reset_chat():
@@ -98,21 +101,23 @@ def reset_chat():
 
 
 def add_thread(thread_id):
-    if thread_id not in st.session_state["chat_threads"]:
-        st.session_state["chat_threads"].append(thread_id)
+    tid = str(thread_id)
+    if tid not in st.session_state["chat_threads"]:
+        st.session_state["chat_threads"].append(tid)
 
 
 def load_conversation(thread_id):
-    state = chatbot.get_state(config={"configurable": {"thread_id": thread_id}})
+    state = chatbot.get_state(config={"configurable": {"thread_id": str(thread_id)}})
     return state.values.get("messages", [])
-
-
-def short_label(thread_id):
-    return f"💬  Chat · {str(thread_id)[-8:]}"
 
 
 def file_icon(filetype):
     return "📝" if filetype == ".docx" else "📄"
+
+
+def make_title(thread_id: str, titles: dict) -> str:
+    """Return saved title or fallback to timestamp-style label."""
+    return titles.get(str(thread_id), f"Chat · {str(thread_id)[-8:]}")
 
 
 # ======================= Session Initialization ===================
@@ -123,10 +128,14 @@ if "thread_id" not in st.session_state:
     st.session_state["thread_id"] = generate_thread_id()
 
 if "chat_threads" not in st.session_state:
-    st.session_state["chat_threads"] = retrieve_all_threads()
+    st.session_state["chat_threads"] = [str(t) for t in retrieve_all_threads()]
 
 if "ingested_docs" not in st.session_state:
     st.session_state["ingested_docs"] = {}
+
+# Load persistent titles from DB
+if "thread_titles" not in st.session_state:
+    st.session_state["thread_titles"] = get_all_thread_titles()
 
 add_thread(st.session_state["thread_id"])
 
@@ -148,17 +157,17 @@ with st.sidebar:
 
     st.button("＋  New chat", on_click=reset_chat, use_container_width=True)
 
-    # Document section
+    # ── Document section ──
     st.markdown('<p class="section-label">Document</p>', unsafe_allow_html=True)
 
-    if thread_docs:
-        latest_doc = list(thread_docs.values())[-1]
-        icon = file_icon(latest_doc.get("filetype", ".pdf"))
+    doc_meta = thread_document_metadata(thread_key)
+    if doc_meta:
+        icon = file_icon(doc_meta.get("filetype", ".pdf"))
         st.markdown(
             f"""
             <div class="doc-badge">
-                {icon} <b>{latest_doc.get('filename')}</b><br>
-                {latest_doc.get('chunks')} chunks · {latest_doc.get('documents')} pages
+                {icon} <b>{doc_meta.get('filename')}</b><br>
+                {doc_meta.get('chunks')} chunks · {doc_meta.get('documents')} pages
             </div>
             """,
             unsafe_allow_html=True,
@@ -166,15 +175,14 @@ with st.sidebar:
     else:
         st.caption("No document uploaded for this chat yet.")
 
-    # Accept both PDF and DOCX
     uploaded_file = st.file_uploader(
         "Upload PDF or DOCX",
         type=["pdf", "docx"],
         label_visibility="collapsed",
     )
-
     if uploaded_file:
-        if uploaded_file.name in thread_docs:
+        existing = thread_document_metadata(thread_key)
+        if existing and existing.get("filename") == uploaded_file.name:
             st.caption(f"`{uploaded_file.name}` already indexed.")
         else:
             with st.status("Indexing document…", expanded=True) as status_box:
@@ -192,23 +200,31 @@ with st.sidebar:
                     status_box.update(label=f"❌ {e}", state="error", expanded=False)
             st.rerun()
 
-    # Past conversations
+    # ── Recent conversations — newest first ──
     st.markdown('<p class="section-label">Recent</p>', unsafe_allow_html=True)
 
     selected_thread = None
+    titles = st.session_state["thread_titles"]
+
+    # newest first — current thread always at top
     threads = st.session_state["chat_threads"][::-1]
 
     if not threads:
         st.caption("No past conversations yet.")
     else:
-        for thread_id in threads:
-            label = short_label(thread_id)
-            meta = thread_document_metadata(str(thread_id))
-            if thread_has_document(str(thread_id)):
+        for tid in threads:
+            title = make_title(str(tid), titles)
+            meta = thread_document_metadata(str(tid))
+            if thread_has_document(str(tid)):
                 icon = file_icon(meta.get("filetype", ".pdf"))
-                label = f"{icon}  Chat · {str(thread_id)[-8:]}"
-            if st.button(label, key=f"thread_{thread_id}", use_container_width=True):
-                selected_thread = thread_id
+                label = f"{icon}  {title}"
+            else:
+                label = f"💬  {title}"
+            # highlight active thread
+            if str(tid) == thread_key:
+                label = "▶  " + label.lstrip("💬  ").lstrip("📄  ").lstrip("📝  ")
+            if st.button(label, key=f"thread_{tid}", use_container_width=True):
+                selected_thread = tid
 
 # ============================ Main UI ============================
 st.title("MCP + RAG Chatbot")
@@ -218,20 +234,28 @@ if doc_meta:
     icon = file_icon(doc_meta.get("filetype", ".pdf"))
     st.caption(
         f"{icon} Active doc: **{doc_meta.get('filename')}** — "
-        f"{doc_meta.get('chunks')} chunks, {doc_meta.get('documents')} pages "
-        f"(k={doc_meta.get('k')}, fetch_k={doc_meta.get('fetch_k')})"
+        f"{doc_meta.get('chunks')} chunks, {doc_meta.get('documents')} pages"
     )
 
+# Render chat history — markdown so it looks clean on reload
 for message in st.session_state["message_history"]:
     with st.chat_message(message["role"]):
-        st.text(message["content"])
+        st.markdown(message["content"])
 
 user_input = st.chat_input("Ask anything — search, math, expenses, or your document…")
 
 if user_input:
+    titles = st.session_state["thread_titles"]
+
+    # Save first message as chat title
+    if thread_key not in titles:
+        title = user_input[:40] + ("…" if len(user_input) > 40 else "")
+        save_thread_title(thread_key, title)
+        st.session_state["thread_titles"][thread_key] = title
+
     st.session_state["message_history"].append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.text(user_input)
+        st.markdown(user_input)
 
     CONFIG = {
         "configurable": {"thread_id": thread_key},
@@ -265,6 +289,7 @@ if user_input:
                 if item is None:
                     break
                 message_chunk, metadata = item
+
                 if message_chunk == "error":
                     err_str = str(metadata)
                     if "rate_limit_exceeded" in err_str or "429" in err_str:
@@ -308,14 +333,19 @@ if user_input:
         {"role": "assistant", "content": ai_message}
     )
 
-# Handle thread switch
+# Handle thread switch from sidebar
 if selected_thread:
-    st.session_state["thread_id"] = selected_thread
+    st.session_state["thread_id"] = str(selected_thread)
     messages = load_conversation(selected_thread)
     temp_messages = []
     for msg in messages:
-        role = "user" if isinstance(msg, HumanMessage) else "assistant"
-        temp_messages.append({"role": role, "content": msg.content})
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            continue  # skip ToolMessage — prevents raw JSON showing up
+        if msg.content:
+            temp_messages.append({"role": role, "content": msg.content})
     st.session_state["message_history"] = temp_messages
-    st.session_state["ingested_docs"].setdefault(str(selected_thread), {})
     st.rerun()
