@@ -48,7 +48,7 @@ def submit_async_task(coro):
 # 1. LLM + Embeddings
 # -------------------
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3)
-# llama-3.3-70b-versatile
+# Switch back to llama-3.3-70b-versatile when daily limit resets
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # -------------------
@@ -400,30 +400,17 @@ async def chat_node(state: ChatState, config=None):
 
     system_message = SystemMessage(
         content=(
-            "You are a helpful, friendly assistant with access to these tools:\n\n"
-            "- search_tool: search the web\n"
-            "- get_stock_price: fetch live stock prices\n"
-            "- calculator: solve math — always use this, never answer math in plain text\n"
-            "- add_expense: add a new expense\n"
-            "- list_expenses: list expenses in a date range\n"
-            "- edit_expense: edit an expense by id\n"
-            "- delete_expense: delete an expense by id\n"
-            "- add_credit: add income or salary\n"
-            "- list_credits: list income in a date range\n"
-            "- summarize: summarize expenses vs income and show balance\n"
+            "You are a helpful assistant. Tools available: "
+            "search_tool, get_stock_price, calculator, "
+            "add_expense, list_expenses, edit_expense, delete_expense, "
+            "add_credit, list_credits, summarize"
             + (
-                f"- rag_tool: answer questions from the uploaded "
-                f"{'PDF' if filetype == '.pdf' else 'DOCX'} '{doc_name}'. "
-                f"Always pass thread_id='{thread_id}' when calling rag_tool.\n"
+                f", rag_tool (use for doc '{doc_name}', always pass thread_id='{thread_id}')"
                 if has_doc
-                else "- rag_tool: not available (no document uploaded).\n"
+                else ""
             )
-            + "\nRULES:\n"
-            "- ONE tool call at a time\n"
-            "- For edit/delete, ALWAYS call list_expenses first to find the id\n"
-            "- If no date mentioned, assume today\n"
-            "- After tool result, give a short friendly response\n"
-            "- Never show raw JSON to the user\n"
+            + ".\nRules: one tool at a time. For edit/delete call list_expenses first. "
+            "Use today's date if not mentioned. Never show raw JSON. Be concise."
         )
     )
 
