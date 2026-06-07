@@ -1,13 +1,14 @@
 import queue
 import uuid
-from datetime import datetime
 
 import streamlit as st
 from langraph_rag_backend import (
     chatbot,
     ingest_document,
+    remove_document,
     retrieve_all_threads,
     submit_async_task,
+    run_async,
     thread_document_metadata,
     thread_has_document,
     save_thread_title,
@@ -15,75 +16,56 @@ from langraph_rag_backend import (
     SUPPORTED_EXTENSIONS,
 )
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.types import Command
 
 # =========================== Page Config ===========================
-st.set_page_config(
-    page_title="MCP Chat",
-    page_icon="💬",
-    layout="centered",
-)
+st.set_page_config(page_title="MCP Chat", page_icon="💬", layout="centered")
 
 # =========================== Custom CSS ===========================
 st.markdown(
     """
-    <style>
-    [data-testid="stSidebar"] {
-        background: #0f0f11;
-        border-right: 1px solid #1e1e24;
-    }
-    [data-testid="stSidebar"] * { color: #e2e2e6 !important; }
-    .brand-header {
-        display: flex; align-items: center; gap: 10px;
-        padding: 4px 0 20px 0;
-        border-bottom: 1px solid #1e1e24;
-        margin-bottom: 18px;
-    }
-    .brand-icon {
-        width: 32px; height: 32px;
-        background: linear-gradient(135deg, #6366f1, #8b5cf6);
-        border-radius: 8px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 16px;
-    }
-    .brand-name {
-        font-size: 17px; font-weight: 700;
-        letter-spacing: -0.3px; color: #f1f1f3 !important;
-    }
-    .section-label {
-        font-size: 10px; font-weight: 700;
-        letter-spacing: 1.2px; text-transform: uppercase;
-        color: #555568 !important; margin: 18px 0 8px 2px;
-    }
-    .doc-badge {
-        background: #1a1a2e; border: 1px solid #6366f1;
-        border-radius: 8px; padding: 8px 10px;
-        font-size: 12px; margin: 8px 0;
-        color: #a5b4fc !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stButton"]:first-of-type button {
-        background: #6366f1 !important; color: #fff !important;
-        border: none !important; border-radius: 8px !important;
-        font-weight: 600 !important; width: 100% !important;
-        transition: background 0.2s !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stButton"]:first-of-type button:hover {
-        background: #4f46e5 !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stButton"]:not(:first-of-type) button {
-        background: transparent !important;
-        border: 1px solid #1e1e24 !important;
-        border-radius: 7px !important; color: #b0b0c0 !important;
-        font-size: 13px !important; text-align: left !important;
-        padding: 0.4rem 0.75rem !important; width: 100% !important;
-        margin-bottom: 4px !important;
-        transition: background 0.15s, border-color 0.15s !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stButton"]:not(:first-of-type) button:hover {
-        background: #18181f !important;
-        border-color: #6366f1 !important; color: #e2e2f0 !important;
-    }
-    </style>
-    """,
+<style>
+[data-testid="stSidebar"] { background:#0f0f11; border-right:1px solid #1e1e24; }
+[data-testid="stSidebar"] * { color:#e2e2e6 !important; }
+.brand-header {
+    display:flex; align-items:center; gap:10px;
+    padding:4px 0 20px 0; border-bottom:1px solid #1e1e24; margin-bottom:18px;
+}
+.brand-icon {
+    width:32px; height:32px;
+    background:linear-gradient(135deg,#6366f1,#8b5cf6);
+    border-radius:8px; display:flex; align-items:center;
+    justify-content:center; font-size:16px;
+}
+.brand-name { font-size:17px; font-weight:700; letter-spacing:-0.3px; color:#f1f1f3 !important; }
+.section-label {
+    font-size:10px; font-weight:700; letter-spacing:1.2px;
+    text-transform:uppercase; color:#555568 !important; margin:18px 0 8px 2px;
+}
+.doc-badge {
+    background:#1a1a2e; border:1px solid #6366f1; border-radius:8px;
+    padding:8px 10px; font-size:12px; margin:8px 0; color:#a5b4fc !important;
+}
+.approval-card {
+    background:#1c1a0e; border:1px solid #ca8a04; border-radius:10px;
+    padding:16px 18px; margin:12px 0;
+}
+[data-testid="stSidebar"] [data-testid="stButton"]:first-of-type button {
+    background:#6366f1 !important; color:#fff !important; border:none !important;
+    border-radius:8px !important; font-weight:600 !important; width:100% !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"]:first-of-type button:hover { background:#4f46e5 !important; }
+[data-testid="stSidebar"] [data-testid="stButton"]:not(:first-of-type) button {
+    background:transparent !important; border:1px solid #1e1e24 !important;
+    border-radius:7px !important; color:#b0b0c0 !important; font-size:13px !important;
+    text-align:left !important; padding:0.4rem 0.75rem !important;
+    width:100% !important; margin-bottom:4px !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"]:not(:first-of-type) button:hover {
+    background:#18181f !important; border-color:#6366f1 !important; color:#e2e2f0 !important;
+}
+</style>
+""",
     unsafe_allow_html=True,
 )
 
@@ -94,9 +76,9 @@ def generate_thread_id():
 
 
 def reset_chat():
-    thread_id = generate_thread_id()
-    st.session_state["thread_id"] = thread_id
-    add_thread(thread_id)
+    tid = generate_thread_id()
+    st.session_state["thread_id"] = tid
+    add_thread(tid)
     st.session_state["message_history"] = []
 
 
@@ -115,51 +97,64 @@ def file_icon(filetype):
     return "📝" if filetype == ".docx" else "📄"
 
 
-def make_title(thread_id: str, titles: dict) -> str:
-    """Return saved title or fallback to timestamp-style label."""
+def make_title(thread_id, titles):
     return titles.get(str(thread_id), f"Chat · {str(thread_id)[-8:]}")
 
 
-# ======================= Session Initialization ===================
+def safe_md(text: str) -> str:
+    """Escape $ so markdown doesn't swallow currency symbols."""
+    return text.replace("$", "\\$") if text else ""
+
+
+def get_pending_approval(config):
+    """Return interrupt payload if graph is paused, else None."""
+    try:
+        state = chatbot.get_state(config=config)
+        for task in state.tasks or []:
+            for iv in getattr(task, "interrupts", None) or []:
+                return iv.value
+    except Exception:
+        pass
+    return None
+
+
+# ======================= Session Init ===================
 if "message_history" not in st.session_state:
     st.session_state["message_history"] = []
-
 if "thread_id" not in st.session_state:
     st.session_state["thread_id"] = generate_thread_id()
-
 if "chat_threads" not in st.session_state:
     st.session_state["chat_threads"] = [str(t) for t in retrieve_all_threads()]
-
 if "ingested_docs" not in st.session_state:
     st.session_state["ingested_docs"] = {}
-
-# Load persistent titles from DB
 if "thread_titles" not in st.session_state:
     st.session_state["thread_titles"] = get_all_thread_titles()
 
 add_thread(st.session_state["thread_id"])
-
 thread_key = str(st.session_state["thread_id"])
 thread_docs = st.session_state["ingested_docs"].setdefault(thread_key, {})
 
+CONFIG = {
+    "configurable": {"thread_id": thread_key},
+    "metadata": {"thread_id": thread_key},
+    "run_name": "chat_turn",
+}
+
 # ============================ Sidebar ============================
 with st.sidebar:
-
     st.markdown(
         """
         <div class="brand-header">
             <div class="brand-icon">✦</div>
             <span class="brand-name">MCP Chat</span>
         </div>
-        """,
+    """,
         unsafe_allow_html=True,
     )
 
     st.button("＋  New chat", on_click=reset_chat, use_container_width=True)
 
-    # ── Document section ──
     st.markdown('<p class="section-label">Document</p>', unsafe_allow_html=True)
-
     doc_meta = thread_document_metadata(thread_key)
     if doc_meta:
         icon = file_icon(doc_meta.get("filetype", ".pdf"))
@@ -169,23 +164,24 @@ with st.sidebar:
                 {icon} <b>{doc_meta.get('filename')}</b><br>
                 {doc_meta.get('chunks')} chunks · {doc_meta.get('documents')} pages
             </div>
-            """,
+        """,
             unsafe_allow_html=True,
         )
+        if st.button("🗑️  Remove document", use_container_width=True):
+            remove_document(thread_key)
+            st.rerun()
     else:
-        st.caption("No document uploaded for this chat yet.")
+        st.caption("No document uploaded yet.")
 
     uploaded_file = st.file_uploader(
-        "Upload PDF or DOCX",
-        type=["pdf", "docx"],
-        label_visibility="collapsed",
+        "Upload PDF or DOCX", type=["pdf", "docx"], label_visibility="collapsed"
     )
     if uploaded_file:
         existing = thread_document_metadata(thread_key)
         if existing and existing.get("filename") == uploaded_file.name:
             st.caption(f"`{uploaded_file.name}` already indexed.")
         else:
-            with st.status("Indexing document…", expanded=True) as status_box:
+            with st.status("Indexing document…", expanded=True) as sb:
                 try:
                     summary = ingest_document(
                         uploaded_file.getvalue(),
@@ -193,20 +189,14 @@ with st.sidebar:
                         filename=uploaded_file.name,
                     )
                     thread_docs[uploaded_file.name] = summary
-                    status_box.update(
-                        label="✅ Document indexed", state="complete", expanded=False
-                    )
+                    sb.update(label="✅ Indexed", state="complete", expanded=False)
                 except ValueError as e:
-                    status_box.update(label=f"❌ {e}", state="error", expanded=False)
+                    sb.update(label=f"❌ {e}", state="error", expanded=False)
             st.rerun()
 
-    # ── Recent conversations — newest first ──
     st.markdown('<p class="section-label">Recent</p>', unsafe_allow_html=True)
-
     selected_thread = None
     titles = st.session_state["thread_titles"]
-
-    # newest first — current thread always at top
     threads = st.session_state["chat_threads"][::-1]
 
     if not threads:
@@ -220,9 +210,8 @@ with st.sidebar:
                 label = f"{icon}  {title}"
             else:
                 label = f"💬  {title}"
-            # highlight active thread
             if str(tid) == thread_key:
-                label = "▶  " + label.lstrip("💬  ").lstrip("📄  ").lstrip("📝  ")
+                label = f"▶  {title}"
             if st.button(label, key=f"thread_{tid}", use_container_width=True):
                 selected_thread = tid
 
@@ -237,17 +226,71 @@ if doc_meta:
         f"{doc_meta.get('chunks')} chunks, {doc_meta.get('documents')} pages"
     )
 
-# Render chat history — markdown so it looks clean on reload
+# Render history
 for message in st.session_state["message_history"]:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        st.markdown(safe_md(message["content"]))
 
+# ── Approval UI — shown when graph is paused ──
+pending = get_pending_approval(CONFIG)
+if pending:
+    summary = pending.get("summary", "Proceed with this action?")
+    tool_name = pending.get("tool_name", "action")
+
+    st.markdown(
+        f"""
+        <div class="approval-card">
+            ⚠️ <b>Approval needed</b><br><br>
+            {summary.replace("$", "&#36;")}
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("✅  Approve", use_container_width=True, key="approve_btn"):
+
+            async def _approve():
+                return await chatbot.ainvoke(
+                    Command(resume={"approved": True}), config=CONFIG
+                )
+
+            result = run_async(_approve())
+            # Pick up final assistant message after approval
+            if result and result.get("messages"):
+                for msg in reversed(result["messages"]):
+                    if isinstance(msg, AIMessage) and msg.content:
+                        st.session_state["message_history"].append(
+                            {"role": "assistant", "content": msg.content}
+                        )
+                        break
+            st.rerun()
+
+    with col2:
+        if st.button("❌  Reject", use_container_width=True, key="reject_btn"):
+
+            async def _reject():
+                return await chatbot.ainvoke(
+                    Command(resume={"approved": False}), config=CONFIG
+                )
+
+            result = run_async(_reject())
+            if result and result.get("messages"):
+                for msg in reversed(result["messages"]):
+                    if isinstance(msg, AIMessage) and msg.content:
+                        st.session_state["message_history"].append(
+                            {"role": "assistant", "content": msg.content}
+                        )
+                        break
+            st.rerun()
+
+# ── Chat input ──
 user_input = st.chat_input("Ask anything — search, math, expenses, or your document…")
 
 if user_input:
     titles = st.session_state["thread_titles"]
-
-    # Save first message as chat title
     if thread_key not in titles:
         title = user_input[:40] + ("…" if len(user_input) > 40 else "")
         save_thread_title(thread_key, title)
@@ -255,13 +298,7 @@ if user_input:
 
     st.session_state["message_history"].append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.markdown(user_input)
-
-    CONFIG = {
-        "configurable": {"thread_id": thread_key},
-        "metadata": {"thread_id": thread_key},
-        "run_name": "chat_turn",
-    }
+        st.markdown(safe_md(user_input))
 
     with st.chat_message("assistant"):
         status_holder = {"box": None}
@@ -293,17 +330,17 @@ if user_input:
                 if message_chunk == "error":
                     err_str = str(metadata)
                     if "rate_limit_exceeded" in err_str or "429" in err_str:
-                        yield "⏳ I've hit my usage limit for now. Please try again in a little while."
+                        yield "⏳ Usage limit reached. Please try again in a little while."
                     elif (
                         "api_key" in err_str.lower() or "credentials" in err_str.lower()
                     ):
-                        yield "🔑 API key missing or invalid. Please check your `.env` file."
+                        yield "🔑 API key missing. Please check your `.env` file."
                     elif (
                         "connection" in err_str.lower() or "timeout" in err_str.lower()
                     ):
-                        yield "🌐 Connection issue. Please check your internet and try again."
+                        yield "🌐 Connection issue. Please check your internet."
                     else:
-                        yield f"⚠️ Something went wrong. Please try again.\n\n`{err_str[:200]}`"
+                        yield f"⚠️ Something went wrong.\n\n`{err_str[:200]}`"
                     return
 
                 if isinstance(message_chunk, ToolMessage):
@@ -333,7 +370,11 @@ if user_input:
         {"role": "assistant", "content": ai_message}
     )
 
-# Handle thread switch from sidebar
+    # Rerun if graph paused for approval
+    if get_pending_approval(CONFIG):
+        st.rerun()
+
+# Thread switch
 if selected_thread:
     st.session_state["thread_id"] = str(selected_thread)
     messages = load_conversation(selected_thread)
@@ -344,7 +385,7 @@ if selected_thread:
         elif isinstance(msg, AIMessage):
             role = "assistant"
         else:
-            continue  # skip ToolMessage — prevents raw JSON showing up
+            continue
         if msg.content:
             temp_messages.append({"role": role, "content": msg.content})
     st.session_state["message_history"] = temp_messages
