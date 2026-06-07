@@ -47,8 +47,8 @@ def submit_async_task(coro):
 # -------------------
 # 1. LLM + Embeddings
 # -------------------
-llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3)
-# Switch back to llama-3.3-70b-versatile when daily limit resets
+# llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3)
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.3)
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # -------------------
@@ -409,8 +409,14 @@ async def chat_node(state: ChatState, config=None):
                 if has_doc
                 else ""
             )
-            + ".\nRules: one tool at a time. For edit/delete call list_expenses first. "
-            "Use today's date if not mentioned. Never show raw JSON. Be concise."
+            + ".\nRules:\n"
+            "- ONE tool call at a time\n"
+            "- If user mentions multiple expenses, add them one by one across turns\n"
+            "- For edit/delete call list_expenses first to find the id\n"
+            "- If no date mentioned use today's date\n"
+            "- Never show raw JSON\n"
+            "- Be concise and friendly\n"
+            "- If user input is complex, break it into steps and handle first item first\n"
         )
     )
 
