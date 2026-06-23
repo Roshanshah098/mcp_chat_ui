@@ -1,20 +1,58 @@
-venv/
-.env
+# ── Python ────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+*.pyd
+*.pyc
+
+# ── Virtual environment ────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Environment / secrets ──────────────────────────────────────
+.env
+.env.*
+*.env
+
+# ── Databases (auto-created at runtime) ───────────────────────
 *.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ── Vector store (rebuilt on startup) ─────────────────────────
+chroma_db/
+faiss_index/
+rag-documents/
+
+# ── Uploaded / indexed documents ──────────────────────────────
+uploaded_docs/
+*.pdf
+*.docx
+
+# ── Streamlit cache ───────────────────────────────────────────
+.streamlit/secrets.toml
+
+
+
+# ── OS junk ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Windows binaries / compiled ───────────────────────────────
 *.dll
 *.so
+*.exe
 
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
 
-# @"
-# venv/
-# .env
-# __pycache__/
-# *.pyc
-# *.pyo
-# *.db
-# *.dll
-# *.so
-# "@ | Out-File -FilePath .gitignore -Encoding utf8
+# ── Build / dist ──────────────────────────────────────────────
+dist/
+build/
+*.egg-info/

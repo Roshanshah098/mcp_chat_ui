@@ -1,0 +1,9 @@
+[client]
+showErrorDetails = false
+
+[theme]
+base = "dark"
+backgroundColor = "#080810"
+secondaryBackgroundColor = "#0d0d1a"
+textColor = "#e2e2f0"
+primaryColor = "#6366f1"
