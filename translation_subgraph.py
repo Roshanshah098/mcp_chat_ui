@@ -1,21 +1,37 @@
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
+import os
+import itertools
 
 load_dotenv(override=True)
 
-# ── LLM (same model family as backend) ────────────────────────
-_translation_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+# ── Key rotation for translation LLM ────────────────────────
+_raw_keys = os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", ""))
+_translation_keys = [k.strip() for k in _raw_keys.split(",") if k.strip()]
+if not _translation_keys:
+    raise EnvironmentError("No Groq API key found for translation.")
+
+_translation_key_cycle = itertools.cycle(_translation_keys)
+
+
+def _make_translation_llm():
+    """Create a fresh ChatGroq with the next rotated key."""
+    return ChatGroq(
+        model="llama-3.3-70b-versatile",
+        temperature=0,
+        api_key=next(_translation_key_cycle),
+    )
 
 
 # ── Subgraph state ─────────────────────────────────────────────
 class TranslationState(TypedDict):
-    user_message: str  # last human message (for language detection)
-    assistant_response: str  # last AI message (to be translated if needed)
-    detected_language: str  # filled by detect_language node
-    final_response: str  # filled by translate_response node
+    user_message: str
+    assistant_response: str
+    detected_language: str
+    final_response: str
 
 
 # ── Supported languages ────────────────────────────────────────
@@ -110,7 +126,8 @@ async def detect_language(state: TranslationState) -> dict:
         return {"detected_language": "english"}
 
     prompt = DETECT_PROMPT.format(message=user_msg)
-    response = await _translation_llm.ainvoke(prompt)
+    llm = _make_translation_llm()
+    response = await llm.ainvoke(prompt)
     raw = (
         response.content.strip().lower().split()[0]
         if response.content.strip()
@@ -140,10 +157,11 @@ async def translate_response(state: TranslationState) -> dict:
     system_prompt = TRANSLATION_PROMPTS[lang]
     messages = [
         SystemMessage(content=system_prompt),
-        {"role": "user", "content": response_text},
+        HumanMessage(content=response_text),
     ]
 
-    translated = await _translation_llm.ainvoke(messages)
+    llm = _make_translation_llm()
+    translated = await llm.ainvoke(messages)
     translated_text = translated.content.strip()
 
     # Sanity check: if translated text has far fewer spaces than expected

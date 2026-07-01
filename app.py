@@ -1,8 +1,3 @@
-# =============================================================
-# app.py — MCP Chat Dashboard (Home page)
-# Fast load: SQLite for thread/doc data + Postgres for messages.
-# No LTM queries. No backend import needed.
-# =============================================================
 import re, json, sqlite3
 from collections import Counter
 from datetime import datetime
@@ -159,12 +154,6 @@ html,body,[data-testid="stAppViewContainer"]{
 
 /* ═══════════════════════════════════════════════════════════════
    SIDEBAR — PERMANENTLY OPEN, NO COLLAPSE/REOPEN TOGGLE
-   Override Streamlit's collapse behavior at every level:
-   1. Hide the collapse button entirely
-   2. Force width regardless of collapsed state
-   3. Override transform/position that Streamlit uses to hide it
-   4. Override the collapsedControl overlay
-   5. Ensure the sidebar content is always visible
    ═══════════════════════════════════════════════════════════════ */
 [data-testid="stSidebar"] {
     width: 280px !important;
@@ -181,7 +170,6 @@ html,body,[data-testid="stAppViewContainer"]{
     position: relative !important;
     left: 0 !important;
 }
-/* The inner wrapper that Streamlit sometimes shifts */
 [data-testid="stSidebar"] > div:first-child {
     width: 280px !important;
     margin-left: 0 !important;
@@ -189,7 +177,6 @@ html,body,[data-testid="stAppViewContainer"]{
     position: relative !important;
     left: 0 !important;
 }
-/* All nested divs inside sidebar */
 [data-testid="stSidebar"] div {
     transform: none !important;
     transition: none !important;
@@ -197,8 +184,6 @@ html,body,[data-testid="stAppViewContainer"]{
 [data-testid="stSidebar"] * {
     color: #e2e2f0 !important;
 }
-
-/* Sidebar buttons */
 [data-testid="stSidebar"] [data-testid="stButton"] button {
     background: transparent !important;
     border: 1px solid #1e1e2e !important;
@@ -215,14 +200,11 @@ html,body,[data-testid="stAppViewContainer"]{
     border-color: #6366f1 !important;
     color: #a5b4fc !important;
 }
-
-/* ══ HIDE ALL COLLAPSE/REOPEN CONTROLS COMPLETELY ══ */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
 [data-testid="stSidebarCollapsedControl"] { display: none !important; }
 [data-testid="collapsedControl"] { display: none !important; }
 button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
 
-/* ══ MAIN CONTENT AREA — ALWAYS RESPECT SIDEBAR WIDTH ══ */
 [data-testid="stAppViewContainer"] > section:first-child {
     margin-left: 0 !important;
 }
@@ -231,7 +213,6 @@ button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
     max-width: calc(100% - 280px) !important;
 }
 
-/* page_link in sidebar */
 [data-testid="stSidebar"] [data-testid="stPageLink"] a {
     background: linear-gradient(135deg,#6366f1,#8b5cf6) !important;
     color: #fff !important;
@@ -251,7 +232,6 @@ button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
     transform: translateY(-1px) !important;
 }
 
-/* page_link in main area */
 [data-testid="stPageLink"] a {
     background: rgba(99,102,241,.1) !important;
     border: 1px solid rgba(99,102,241,.35) !important;
@@ -270,7 +250,6 @@ button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
     color: #e2e2f0 !important;
 }
 
-/* ── sidebar brand / sections ── */
 .sb-brand{padding:18px 4px 14px;border-bottom:1px solid #1a1a2e;margin-bottom:14px;}
 .sb-brand-row{display:flex;align-items:center;gap:10px;margin-bottom:3px;}
 .sb-icon{width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#8b5cf6);
@@ -292,7 +271,6 @@ button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
 .sb-stat-label  {color:#c4c4d8!important;}
 .sb-stat-label b{color:#f1f1f3!important;}
 
-/* ── main dashboard styles ── */
 .metric-card{background:#0d0d1a;border:1px solid #1a1a2e;border-radius:14px;
   padding:20px 22px;position:relative;overflow:hidden;}
 .metric-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
@@ -334,7 +312,6 @@ button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
 .doc-row{background:#0d0d1a;border:1px solid #1a1a2e;border-radius:10px;
   padding:11px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
 
-/* ── 3D loader (first-load only) ── */
 .loader-outer{
     position:fixed;top:0;left:0;right:0;bottom:0;
     background:#080810;
@@ -385,11 +362,6 @@ button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
 
 # =============================================================
 # FIRST-LOAD 3D LOADER
-# Shown only once per server process — the first time the heavy
-# lang_rag_backend import happens (triggered by _get_backend()
-# below). Rendered into an st.empty() placeholder so it can be
-# cleared afterward; without that handle the fixed-position
-# overlay would never go away.
 # =============================================================
 import sys as _sys
 
@@ -462,14 +434,6 @@ def _pg():
 
 @st.cache_resource(show_spinner=False)
 def _get_backend():
-    """
-    Reuse the SAME already-initialized chatbot/checkpointer objects
-    that pages/1_Chat.py uses. This is the only reliable way to read
-    conversation messages — LangGraph's checkpoint_writes table stores
-    serialized channel-write deltas, not flat {type, content} dicts,
-    so hand-parsing the raw blob (the old approach) silently failed
-    to extract AI messages and any new conversation turns.
-    """
     import lang_rag_backend as backend
 
     return backend
@@ -511,20 +475,9 @@ def _load_thread_docs():
 
 @st.cache_data(ttl=15, show_spinner=False)
 def _load_messages_and_threads():
-    """
-    Returns (messages, thread_ids).
-
-    Enumerates thread_ids via checkpointer.list(None) — same call
-    retrieve_all_threads() uses in 1_Chat.py — then pulls the FINAL
-    state per thread via chatbot.get_state(), which correctly
-    deserializes both human AND ai messages (the raw-blob parser
-    never did this reliably). ttl=15 keeps the dashboard close to
-    real-time without hammering Postgres on every rerun.
-    """
     messages, thread_ids = [], set()
     try:
         backend = _get_backend()
-
         for checkpoint in backend.checkpointer.list(None):
             tid = checkpoint.config.get("configurable", {}).get("thread_id")
             if tid:
@@ -564,7 +517,6 @@ def _load_messages_and_threads():
                 print(f"[Dashboard/thread-{tid}] {e}")
     except Exception as e:
         print(f"[Dashboard/Messages] {e}")
-
     return messages, thread_ids
 
 
@@ -647,7 +599,7 @@ def _topics(messages):
 
 
 # =============================================================
-# PLOTLY HELPERS — use width="stretch" (new API, no deprecation)
+# PLOTLY HELPERS
 # =============================================================
 _B = dict(
     paper_bgcolor="rgba(0,0,0,0)",
@@ -789,8 +741,6 @@ thread_titles = _load_thread_titles()
 thread_docs = _load_thread_docs()
 all_messages, _thread_ids = _load_messages_and_threads()
 
-# Clear the full-screen 3D loader now that the backend (triggered
-# by _load_messages_and_threads -> _get_backend) has finished.
 if _FIRST_LOAD:
     _loader_slot.empty()
     st.toast(
@@ -844,6 +794,7 @@ with st.sidebar:
     )
 
     st.page_link("pages/1_Chat.py", label="💬  Open Chatbot")
+    st.page_link("pages/2_Blog.py", label="📝  Blog Generator")
     st.markdown("<div style='margin:6px 0'></div>", unsafe_allow_html=True)
 
     if st.button("🔄  Refresh Data", width="stretch", key="refresh_data_btn"):

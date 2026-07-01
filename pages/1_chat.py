@@ -1,10 +1,5 @@
 # =============================================================
-# pages/1_Chat.py — MCP Chat Interface
-# Rebuilt from the user's CONFIRMED WORKING baseline (chat_backup).
-# NO sidebar JS tricks, NO initial_sidebar_state override, NO
-# sidebar-during-loading placeholder. Streamlit owns sidebar
-# collapse/expand state completely — exactly like the baseline
-# that was verified to close AND reopen correctly.
+# - MCP Chat Interface
 # =============================================================
 import queue
 import re
@@ -16,7 +11,7 @@ import streamlit as st
 st.set_page_config(page_title="MCP Chat", page_icon="💬", layout="wide")
 
 # =============================================================
-# CSS
+# CSS 
 # =============================================================
 st.markdown(
     """
@@ -33,39 +28,64 @@ html,body,[data-testid="stAppViewContainer"]{
 ::-webkit-scrollbar-track{background:#0d0d1a;}
 ::-webkit-scrollbar-thumb{background:#6366f1;border-radius:4px;}
 
-/* ── SIDEBAR — PERMANENTLY OPEN, NO COLLAPSE/REOPEN TOGGLE AT ALL.
-   The collapse button is hidden entirely so it can never be clicked,
-   and width is forced unconditionally (not gated on aria-expanded),
-   so there is no broken collapsed state to ever get stuck in.        ── */
-[data-testid="stSidebar"]{
-    width:280px!important;
-    min-width:280px!important;
-    max-width:280px!important;
-    margin-left:0!important;
-    background:linear-gradient(180deg,#0a0a14 0%,#0d0d1a 100%)!important;
-    border-right:1px solid #1a1a2e!important;
+[data-testid="stSidebar"] {
+    width: 280px !important;
+    min-width: 280px !important;
+    max-width: 280px !important;
+    margin-left: 0 !important;
+    transform: none !important;
+    transition: none !important;
+    background: linear-gradient(180deg,#0a0a14 0%,#0d0d1a 100%) !important;
+    border-right: 1px solid #1a1a2e !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: block !important;
+    position: relative !important;
+    left: 0 !important;
 }
-[data-testid="stSidebar"] > div:first-child{
-    width:280px!important;
-    margin-left:0!important;
+[data-testid="stSidebar"] > div:first-child {
+    width: 280px !important;
+    margin-left: 0 !important;
+    transform: none !important;
+    position: relative !important;
+    left: 0 !important;
 }
-[data-testid="stSidebar"] *{color:#e2e2f0!important;}
-[data-testid="stSidebar"] [data-testid="stButton"] button{
-    background:transparent!important;border:1px solid #1e1e2e!important;
-    border-radius:10px!important;color:#c4c4d8!important;font-size:13px!important;
-    text-align:left!important;padding:9px 12px!important;
-    transition:all .18s!important;width:100%!important;
+[data-testid="stSidebar"] div {
+    transform: none !important;
+    transition: none !important;
 }
-[data-testid="stSidebar"] [data-testid="stButton"] button:hover{
-    background:rgba(99,102,241,.12)!important;border-color:#6366f1!important;
-    color:#a5b4fc!important;
+[data-testid="stSidebar"] * {
+    color: #e2e2f0 !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] button {
+    background: transparent !important;
+    border: 1px solid #1e1e2e !important;
+    border-radius: 10px !important;
+    color: #c4c4d8 !important;
+    font-size: 13px !important;
+    text-align: left !important;
+    padding: 9px 12px !important;
+    transition: all .18s !important;
+    width: 100% !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] button:hover {
+    background: rgba(99,102,241,.12) !important;
+    border-color: #6366f1 !important;
+    color: #a5b4fc !important;
+}
+[data-testid="stSidebarCollapseButton"] { display: none !important; }
+[data-testid="stSidebarCollapsedControl"] { display: none !important; }
+[data-testid="collapsedControl"] { display: none !important; }
+button[kind="secondary"] [data-testid="stIcon"] { display: none !important; }
+
+[data-testid="stAppViewContainer"] > section:first-child {
+    margin-left: 0 !important;
+}
+[data-testid="stAppViewContainer"] > section:nth-child(2) {
+    margin-left: 280px !important;
+    max-width: calc(100% - 280px) !important;
 }
 
-/* Hide the collapse/reopen controls completely — no toggle, nothing to break */
-[data-testid="stSidebarCollapseButton"]{display:none!important;}
-[data-testid="collapsedControl"]{display:none!important;}
-
-/* ── brand / status / sections ── */
 .brand-wrap{padding:20px 4px 16px;border-bottom:1px solid #1a1a2e;margin-bottom:16px;}
 .brand-row{display:flex;align-items:center;gap:10px;margin-bottom:4px;}
 .brand-icon{width:36px;height:36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);
@@ -127,7 +147,6 @@ html,body,[data-testid="stAppViewContainer"]{
   display:flex;align-items:center;gap:6px;}
 .approval-body{font-size:13px;color:#e2e2f0;line-height:1.6;}
 
-/* ── chat main area ── */
 .chat-header{background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(139,92,246,.04));
   border:1px solid #1a1a2e;border-radius:16px;padding:18px 24px;margin-bottom:20px;
   display:flex;align-items:center;justify-content:space-between;}
@@ -178,7 +197,6 @@ html,body,[data-testid="stAppViewContainer"]{
     width:34px!important;height:34px!important;
 }
 
-/* ── 3D loader ── */
 .loader-outer{
     position:fixed;top:0;left:0;right:0;bottom:0;
     background:#080810;
@@ -235,12 +253,9 @@ html,body,[data-testid="stAppViewContainer"]{
     unsafe_allow_html=True,
 )
 
-# ── First-load detection ──────────────────────────────────────
+# ── First-load detection ──
 _FIRST_LOAD = "lang_rag_backend" not in sys.modules
 
-# CRITICAL: the loader is position:fixed and covers the whole screen.
-# It MUST be rendered into an st.empty() placeholder so it can be
-# cleared with loader_slot.empty() once the backend finishes loading.
 loader_slot = st.empty()
 if _FIRST_LOAD:
     with loader_slot.container():
@@ -287,7 +302,7 @@ if _FIRST_LOAD:
             unsafe_allow_html=True,
         )
 
-# ── Heavy import (triggers the boot) ─────────────────────────
+# ── Heavy import ──
 from lang_rag_backend import (
     chatbot,
     ingest_document,
@@ -308,6 +323,7 @@ from lang_rag_backend import (
     mark_thread_deleted,
     get_thread_created_dates,
     record_thread_created,
+    generate_blog,
 )
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
@@ -320,7 +336,6 @@ if "system_status" not in st.session_state:
         "mcp_tools": len(mcp_tools),
     }
 
-# Clear the full-screen loader now that the backend has finished loading.
 if _FIRST_LOAD:
     loader_slot.empty()
     _s = st.session_state["system_status"]
@@ -407,15 +422,8 @@ def generate_thread_id():
 
 
 def _set_active_thread(tid: str):
-    """
-    Mirrors the active thread_id into the URL query string (?tid=...)
-    so a hard browser refresh (F5) can read the same thread_id back
-    instead of generating a fresh random UUID. Plain unconditional
-    write — matches the confirmed-working baseline exactly.
-    """
     tid = str(tid)
     st.session_state["thread_id"] = tid
-    st.query_params["tid"] = tid
     _add_thread_to_front(tid)
 
 
@@ -497,17 +505,8 @@ if "loaded_threads" not in st.session_state:
 if "message_history" not in st.session_state:
     st.session_state["message_history"] = []
 
-# Resolve active thread_id: session_state -> URL query param -> fresh UUID.
 if "thread_id" not in st.session_state:
-    qp_tid = st.query_params.get("tid")
-    st.session_state["thread_id"] = qp_tid if qp_tid else generate_thread_id()
-
-# Keep the URL in sync with the active thread — plain unconditional write,
-# matching the confirmed-working baseline. (Earlier we tried making this
-# conditional, suspecting a query_params/rerun race; the dashboard, which
-# never touches query_params at all, showed the identical sidebar bug,
-# conclusively ruling query_params out as a cause either way.)
-st.query_params["tid"] = st.session_state["thread_id"]
+    st.session_state["thread_id"] = generate_thread_id()
 
 _add_thread_to_front(st.session_state["thread_id"])
 thread_key = str(st.session_state["thread_id"])
@@ -520,7 +519,6 @@ CONFIG = {
 
 # Auto-restore messages on first visit to a thread
 if thread_key not in st.session_state["loaded_threads"]:
-    # Ensure creation date is recorded for restored threads too
     record_thread_created(thread_key)
     try:
         raw_msgs = load_conversation(thread_key)
@@ -587,6 +585,7 @@ with st.sidebar:
     )
 
     st.page_link("app.py", label="📊  Back to Dashboard")
+    st.page_link("pages/2_Blog.py", label="📝  Blog Generator")
     st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
 
     st.markdown('<div class="new-chat-btn">', unsafe_allow_html=True)
@@ -664,9 +663,35 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
-    # Recent threads — grouped by creation date (Today / Yesterday / date).
-    # Defensive: falls back to a flat list if date-grouping fails for
-    # any reason, rather than breaking the sidebar.
+    # Blog Generator in Sidebar
+    st.markdown('<div class="sec-label">📝 Blog</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="upload-hint"><span>Generate a blog</span><br>AI-powered research & writing with free images</div>',
+        unsafe_allow_html=True,
+    )
+    blog_topic_input = st.text_input(
+        "Topic",
+        placeholder="e.g., Latest AI trends...",
+        key="chat_sidebar_blog_topic",
+        label_visibility="collapsed",
+    )
+    if st.button("✨ Generate Blog", width="stretch", key="generate_blog_btn_sidebar"):
+        if blog_topic_input.strip():
+            # FIXED: Updated spinner to reflect new image hierarchy
+            with st.spinner(
+                "Researching and writing... (images: HF FLUX.1-schnell → HF Providers fallback)"
+            ):
+                try:
+                    blog_md = generate_blog(topic=blog_topic_input.strip())
+                    st.session_state["last_blog"] = blog_md
+                    st.session_state["last_blog_topic"] = blog_topic_input.strip()
+                    st.toast("✅ Blog generated! Check the Blog page.", icon="📝")
+                except Exception as e:
+                    st.error(f"Blog generation failed: {e}")
+        else:
+            st.warning("Please enter a topic first.")
+
+    # Recent threads
     st.markdown('<div class="sec-label">🕐 Recent</div>', unsafe_allow_html=True)
     titles = st.session_state["thread_titles"]
     threads = st.session_state["chat_threads"]

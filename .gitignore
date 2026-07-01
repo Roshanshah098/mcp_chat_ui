@@ -1,58 +1,64 @@
-# ── Python ────────────────────────────────────────────────────
+@"
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.pyc
 
-# ── Virtual environment ────────────────────────────────────────
+# Virtual environment
 venv/
 .venv/
 env/
 ENV/
 
-# ── Environment / secrets ──────────────────────────────────────
+# Environment / secrets
 .env
 .env.*
 *.env
 
-# ── Databases (auto-created at runtime) ───────────────────────
+# Databases (auto-created at runtime)
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
 
-# ── Vector store (rebuilt on startup) ─────────────────────────
+# Vector store (rebuilt on startup)
 chroma_db/
 faiss_index/
 rag-documents/
 
-# ── Uploaded / indexed documents ──────────────────────────────
+# Uploaded / indexed documents
 uploaded_docs/
 *.pdf
 *.docx
 
-# ── Streamlit cache ───────────────────────────────────────────
+# Generated blog output (auto-created at runtime)
+blogs/
+
+# Local testing / scratch files
+addtional_files_for_testing/
+
+# Streamlit cache
 .streamlit/secrets.toml
 
-
-
-# ── OS junk ───────────────────────────────────────────────────
+# OS junk
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ── Windows binaries / compiled ───────────────────────────────
+# Windows binaries / compiled
 *.dll
 *.so
 *.exe
 
-# ── Logs ──────────────────────────────────────────────────────
+# Logs
 *.log
 logs/
 
-# ── Build / dist ──────────────────────────────────────────────
+# Build / dist
 dist/
 build/
 *.egg-info/
+"@ | Set-Content -Encoding utf8 .gitignore
